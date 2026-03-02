@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>אפשר להתקלח?</title>
+  <script src="https://unpkg.com/petite-vue@0.4.1/dist/petite-vue.iife.js" defer init></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+      color: #e2e8f0;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    .bg-blobs {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+    }
+    .bg-blobs span {
+      position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.15;
+      animation: float 20s ease-in-out infinite alternate;
+    }
+    .bg-blobs .b1 { width: 500px; height: 500px; background: #6366f1; top: -10%; left: -10%; }
+    .bg-blobs .b2 { width: 400px; height: 400px; background: #3b82f6; bottom: -10%; right: -10%; animation-delay: -7s; }
+    .bg-blobs .b3 { width: 300px; height: 300px; background: #8b5cf6; top: 50%; left: 50%; animation-delay: -14s; }
+    @keyframes float {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(40px, -30px) scale(1.1); }
+    }
+
+    .app { position: relative; z-index: 1; max-width: 640px; margin: 0 auto; padding: 1.5rem 1rem 2rem; }
+
+    .glass {
+      background: rgba(255,255,255,0.06);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+    }
+
+    /* Header */
+    header { text-align: center; margin-bottom: 2rem; position: relative; }
+    .lang-toggle {
+      position: absolute; top: 0; left: 0;
+      display: flex; border-radius: 999px; overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.15); font-size: 0.75rem;
+    }
+    [dir="ltr"] .lang-toggle { left: auto; right: 0; }
+    .lang-toggle button {
+      padding: 0.3rem 0.65rem; border: none; cursor: pointer;
+      background: transparent; color: #94a3b8; font-weight: 600;
+      transition: all 0.2s;
+    }
+    .lang-toggle button.active {
+      background: rgba(99,102,241,0.5); color: #fff;
+    }
+    h1 { font-size: clamp(1.8rem, 5vw, 2.5rem); font-weight: 800; margin-bottom: 0.25rem; }
+    .subtitle { font-size: 0.9rem; color: #94a3b8; margin-bottom: 0.5rem; }
+    .status { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; color: #94a3b8; }
+    .status-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: #ef4444;
+      transition: background 0.3s;
+    }
+    .status-dot.ok { background: #22c55e; animation: pulse-dot 2s ease-in-out infinite; }
+    @keyframes pulse-dot { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+
+    /* Inactive banner */
+    .inactive-banner {
+      padding: 0.65rem 1rem; text-align: center; font-size: 0.8rem;
+      color: #94a3b8; margin-bottom: 1.5rem;
+    }
+
+    /* Risk gauge */
+    .risk-section { display: flex; flex-direction: column; align-items: center; margin-bottom: 2rem; }
+    .risk-gauge { position: relative; width: 260px; height: 150px; }
+    @media (min-width:600px) { .risk-gauge { width: 300px; height: 170px; } }
+    .risk-gauge { direction: ltr; }
+    .risk-gauge svg { width: 100%; height: 100%; display: block; }
+    .gauge-text {
+      position: absolute; bottom: 4px; left: 0; right: 0;
+      display: flex; flex-direction: column; align-items: center;
+      pointer-events: none;
+    }
+    .risk-percent {
+      font-size: clamp(2.5rem, 10vw, 3.5rem); font-weight: 800;
+      color: #fff; line-height: 1;
+    }
+    .risk-sublabel {
+      font-size: 0.85rem; font-weight: 600;
+      color: rgba(255,255,255,0.85); margin-top: 0.2rem;
+    }
+    .risk-rec { font-size: 0.95rem; color: #cbd5e1; text-align: center; margin-top: 0.75rem; max-width: 400px; }
+
+    /* Controls */
+    .controls-card { padding: 1.25rem; margin-bottom: 1.5rem; position: relative; z-index: 10; }
+    .control-label { font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.5rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+
+    .duration-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1.25rem; }
+    .dur-pill {
+      padding: 0.45rem 1rem; border-radius: 999px; border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.05); color: #e2e8f0; font-size: 0.85rem;
+      cursor: pointer; transition: all 0.2s; white-space: nowrap;
+    }
+    .dur-pill:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); }
+    .dur-pill.active { background: rgba(99,102,241,0.45); border-color: rgba(99,102,241,0.6); color: #fff; }
+    .dur-custom {
+      width: 60px; padding: 0.45rem 0.5rem; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.05);
+      color: #e2e8f0; font-size: 0.85rem; text-align: center;
+      transition: border-color 0.2s;
+    }
+    .dur-custom:focus { outline: none; border-color: rgba(99,102,241,0.6); }
+    .dur-custom::placeholder { color: #64748b; }
+    .dur-custom::-webkit-outer-spin-button,
+    .dur-custom::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .dur-custom { -moz-appearance: textfield; }
+
+    .loc-input-wrap { position: relative; }
+    .loc-input {
+      width: 100%; padding: 0.7rem 1rem; border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.05);
+      color: #e2e8f0; font-size: 0.95rem; transition: border-color 0.2s;
+    }
+    .loc-input::placeholder { color: #64748b; }
+    .loc-input:focus { outline: none; border-color: rgba(99,102,241,0.6); }
+
+    .ac-dropdown {
+      position: absolute; top: 100%; right: 0; left: 0; margin-top: 0.3rem;
+      border-radius: 12px; max-height: 200px; overflow-y: auto; z-index: 20;
+      background: rgba(30,25,60,0.95); backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 12px 24px rgba(0,0,0,0.4);
+    }
+    .ac-item {
+      padding: 0.6rem 1rem; cursor: pointer; transition: background 0.15s;
+      font-size: 0.9rem;
+    }
+    .ac-item:hover { background: rgba(255,255,255,0.08); }
+    .ac-item:first-child { border-radius: 12px 12px 0 0; }
+    .ac-item:last-child { border-radius: 0 0 12px 12px; }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.3rem 0.7rem; border-radius: 999px;
+      background: rgba(99,102,241,0.25); border: 1px solid rgba(99,102,241,0.35);
+      font-size: 0.8rem; color: #c7d2fe;
+    }
+    .chip button {
+      background: none; border: none; color: #94a3b8; cursor: pointer;
+      font-size: 1rem; line-height: 1; padding: 0 0.15rem;
+      transition: color 0.15s;
+    }
+    .chip button:hover { color: #ef4444; }
+
+    /* Info cards */
+    .cards-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 2rem; }
+    @media (max-width:600px) { .cards-grid { grid-template-columns: 1fr 1fr; } }
+    .info-card { padding: 0.85rem; }
+    .info-card-title { font-size: 0.7rem; color: #94a3b8; margin-bottom: 0.3rem; }
+    .info-card-value { font-size: 1rem; font-weight: 600; }
+    .info-card-sub { font-size: 0.65rem; color: #64748b; margin-top: 0.15rem; }
+    .trend-up { color: #f87171; }
+    .trend-down { color: #4ade80; }
+    .trend-stable { color: #94a3b8; }
+
+    /* Footer */
+    footer {
+      font-size: 0.7rem; color: #64748b; text-align: center;
+      padding-top: 1.25rem; border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    footer p { margin-bottom: 0.4rem; }
+    footer a { color: #818cf8; text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* Transitions */
+    .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
+    .fade-enter-from, .fade-leave-to { opacity: 0; }
+  </style>
+</head>
+<body>
+  <div class="bg-blobs"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+
+  <div class="app" v-scope="App()" v-cloak @vue:mounted="init()">
+    <header>
+      <div class="lang-toggle">
+        <button :class="{ active: lang === 'he' }" @click="setLang('he')">עב</button>
+        <button :class="{ active: lang === 'en' }" @click="setLang('en')">EN</button>
+      </div>
+      <h1 v-text="t.title"></h1>
+      <p class="subtitle" v-text="t.subtitle"></p>
+      <div class="status">
+        <span class="status-dot" :class="{ ok: connected }"></span>
+        <span v-text="connected ? t.connected : t.disconnected"></span>
+      </div>
+    </header>
+
+    <div v-if="!data.isActive" class="glass inactive-banner" v-text="t.inactive"></div>
+
+    <main class="risk-section">
+      <div class="risk-gauge" dir="ltr">
+        <svg viewBox="0 0 200 115">
+          <defs>
+            <linearGradient id="grad-green" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#16a34a" /><stop offset="100%" stop-color="#4ade80" />
+            </linearGradient>
+            <linearGradient id="grad-yellow" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#d97706" /><stop offset="100%" stop-color="#fbbf24" />
+            </linearGradient>
+            <linearGradient id="grad-red" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#dc2626" /><stop offset="100%" stop-color="#f87171" />
+            </linearGradient>
+          </defs>
+          <path fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="12" stroke-linecap="round" d="M 16 100 A 84 84 0 0 1 184 100" />
+          <path fill="none" :stroke="gaugeGradient" stroke-width="12" stroke-linecap="round" d="M 16 100 A 84 84 0 0 1 184 100" :stroke-dasharray="gaugeDash" style="transition: stroke-dasharray 0.8s ease, stroke 0.5s ease;" />
+        </svg>
+        <div class="gauge-text">
+          <span class="risk-percent" v-text="riskDisplay"></span>
+          <span class="risk-sublabel" v-text="riskLabel"></span>
+        </div>
+      </div>
+      <p class="risk-rec" v-text="riskRec"></p>
+    </main>
+
+    <section class="controls-card glass">
+      <div class="control-label" v-text="t.duration"></div>
+      <div class="duration-row">
+        <button v-for="d in quickDurations" :key="d" class="dur-pill" :class="{ active: duration === d && !customFocused }" @click="pickDuration(d)">
+          {{ d }} {{ t.min }}
+        </button>
+        <input type="number" class="dur-custom" :placeholder="t.custom" v-model.number="customDuration" @focus="customFocused = true" @blur="onCustomBlur" @input="onCustomInput" min="1">
+      </div>
+
+      <div class="control-label" v-text="t.locations"></div>
+      <div class="loc-input-wrap">
+        <input type="text" class="loc-input" :placeholder="t.locPlaceholder" v-model="locQuery" @input="onLocInput" @focus="onLocFocus" autocomplete="off">
+        <div v-if="showDropdown && filteredLocs.length" class="ac-dropdown">
+          <div v-for="loc in filteredLocs" :key="loc" class="ac-item" @click="pickLocation(loc)" v-text="loc"></div>
+        </div>
+      </div>
+      <div v-if="selectedLocations.length" class="chips">
+        <span v-for="loc in selectedLocations" :key="loc" class="chip">
+          {{ loc }}
+          <button @click="removeLocation(loc)">×</button>
+        </span>
+      </div>
+    </section>
+
+    <section class="cards-grid">
+      <div class="glass info-card">
+        <div class="info-card-title" v-text="t.timeSince"></div>
+        <div class="info-card-value" v-text="fmtMin(data.minutesSinceLastAlert)"></div>
+      </div>
+      <div class="glass info-card">
+        <div class="info-card-title" v-text="t.expectedAlert"></div>
+        <div class="info-card-value" v-text="fmtMin(data.expectedNextAlert)"></div>
+      </div>
+      <div class="glass info-card">
+        <div class="info-card-title" v-text="t.alertCount"></div>
+        <div class="info-card-value" v-text="data.salvoCount || '–'"></div>
+      </div>
+      <div class="glass info-card">
+        <div class="info-card-title" v-text="t.trend"></div>
+        <div class="info-card-value" :class="trendClass">
+          <span v-text="trendIcon"></span> {{ trendText }}
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <p v-text="t.disclaimer"></p>
+      <p>
+        <span v-text="t.source"></span>
+        <a href="https://www.tzevaadom.co.il" target="_blank" rel="noopener">{{ t.sourceName }}</a>
+      </p>
+      <p>{{ t.lastUpdate }}: {{ lastUpdateTime }}</p>
+    </footer>
+  </div>
+
+  <script>
+    var translations = {
+      he: {
+        title: 'אפשר להתקלח?',
+        subtitle: 'הערכת סיכון בזמן אמת',
+        connected: 'מחובר',
+        disconnected: 'לא מחובר',
+        inactive: 'אין עימות פעיל כרגע. הנתונים מבוססים על תקופת העימות האחרונה.',
+        duration: 'משך המקלחת',
+        min: 'דק׳',
+        custom: 'אחר',
+        locations: 'יישובים',
+        locPlaceholder: 'חפשו יישוב...',
+        timeSince: 'זמן מהאזעקה האחרונה',
+        expectedAlert: 'אזעקה צפויה בעוד',
+        alertCount: 'מספר אזעקות',
+        trend: 'מגמה',
+        trendUp: 'עולה',
+        trendDown: 'יורדת',
+        trendStable: 'יציבה',
+        riskLow: 'סיכון נמוך',
+        riskMed: 'סיכון בינוני',
+        riskHigh: 'סיכון גבוה',
+        recLow: 'חלון זמן יחסית בטוח — תתקלחו מהר',
+        recMed: 'סיכון בינוני — היו מוכנים לעצור',
+        recHigh: 'סיכון גבוה — לא מומלץ כרגע',
+        disclaimer: 'המידע מבוסס על ניתוח סטטיסטי של נתוני אזעקות היסטוריים. אין לראות במידע זה תחליף להנחיות פיקוד העורף.',
+        source: 'מקור נתונים: ',
+        sourceName: 'צופר',
+        lastUpdate: 'עודכן לאחרונה',
+        loading: 'טוען...',
+        lessThanMin: 'פחות מדקה',
+        minutes: 'דקות',
+        hours: 'שעות',
+        and: 'ו-',
+        days: 'ימים'
+      },
+      en: {
+        title: 'Can I Shower?',
+        subtitle: 'Real-time risk assessment',
+        connected: 'Connected',
+        disconnected: 'Disconnected',
+        inactive: 'No active conflict right now. Data is based on the last conflict period.',
+        duration: 'Shower duration',
+        min: 'min',
+        custom: 'Other',
+        locations: 'Locations',
+        locPlaceholder: 'Search location...',
+        timeSince: 'Time since last alert',
+        expectedAlert: 'Expected alert in',
+        alertCount: 'Alert count',
+        trend: 'Trend',
+        trendUp: 'Increasing',
+        trendDown: 'Decreasing',
+        trendStable: 'Stable',
+        riskLow: 'Low risk',
+        riskMed: 'Moderate risk',
+        riskHigh: 'High risk',
+        recLow: 'Relatively safe window — shower quickly',
+        recMed: 'Moderate risk — be ready to stop',
+        recHigh: 'High risk — not recommended right now',
+        disclaimer: 'This information is based on statistical analysis of historical alert data. It is not a substitute for official Home Front Command guidelines.',
+        source: 'Data source: ',
+        sourceName: 'Tzofar',
+        lastUpdate: 'Last updated',
+        loading: 'Loading...',
+        lessThanMin: 'Less than a minute',
+        minutes: 'minutes',
+        hours: 'hours',
+        and: 'and ',
+        days: 'days'
+      }
+    };
+
+    function App() {
+      return {
+        lang: 'he',
+        connected: false,
+        duration: 10,
+        customDuration: null,
+        customFocused: false,
+        quickDurations: [5, 10, 15, 20],
+        allLocations: [],
+        selectedLocations: [],
+        locQuery: '',
+        showDropdown: false,
+        lastUpdateTime: '–',
+        data: {
+          risk: 0, isActive: true, minutesSinceLastAlert: null,
+          salvoCount: 0, trend: 'stable', expectedNextAlert: null
+        },
+        timer: null,
+
+        get t() { return translations[this.lang]; },
+
+        get riskClass() {
+          var r = this.data.risk;
+          if (r > 0.4) return 'red';
+          if (r >= 0.25) return 'yellow';
+          return 'green';
+        },
+
+        get riskDisplay() {
+          if (this.data.minutesSinceLastAlert == null) return '–';
+          return Math.round(this.data.risk * 100) + '%';
+        },
+
+        get gaugeArcLen() {
+          return Math.PI * 84;
+        },
+
+        get gaugeDash() {
+          if (this.data.minutesSinceLastAlert == null) return '0 ' + this.gaugeArcLen;
+          var fill = this.gaugeArcLen * Math.min(this.data.risk, 1);
+          return fill + ' ' + this.gaugeArcLen;
+        },
+
+        get gaugeGradient() {
+          return 'url(#grad-' + this.riskClass + ')';
+        },
+
+        get riskLabel() {
+          if (this.data.minutesSinceLastAlert == null) return this.t.loading;
+          var cls = this.riskClass;
+          if (cls === 'red') return this.t.riskHigh;
+          if (cls === 'yellow') return this.t.riskMed;
+          return this.t.riskLow;
+        },
+
+        get riskRec() {
+          if (this.data.minutesSinceLastAlert == null) return '';
+          var cls = this.riskClass;
+          if (cls === 'red') return this.t.recHigh;
+          if (cls === 'yellow') return this.t.recMed;
+          return this.t.recLow;
+        },
+
+        get trendClass() {
+          var tr = this.data.trend || 'stable';
+          return 'trend-' + (tr === 'increasing' ? 'up' : tr === 'decreasing' ? 'down' : 'stable');
+        },
+
+        get trendIcon() {
+          var tr = this.data.trend || 'stable';
+          if (tr === 'increasing') return '↑';
+          if (tr === 'decreasing') return '↓';
+          return '→';
+        },
+
+        get trendText() {
+          var tr = this.data.trend || 'stable';
+          if (tr === 'increasing') return this.t.trendUp;
+          if (tr === 'decreasing') return this.t.trendDown;
+          return this.t.trendStable;
+        },
+
+        get filteredLocs() {
+          var q = (this.locQuery || '').trim().toLowerCase();
+          if (!q) return [];
+          var sel = this.selectedLocations;
+          return this.allLocations
+            .filter(function(l) { return l.toLowerCase().includes(q) && sel.indexOf(l) === -1; })
+            .slice(0, 8);
+        },
+
+        fmtMin(m) {
+          if (m == null) return '–';
+          var t = this.t;
+          if (m < 1) return t.lessThanMin;
+          if (m < 60) return Math.round(m) + ' ' + t.minutes;
+          var h = Math.floor(m / 60), rm = Math.round(m % 60);
+          if (h < 24) return h + ' ' + t.hours + (rm > 0 ? ' ' + t.and + rm + ' ' + t.min : '');
+          return Math.floor(h / 24) + ' ' + t.days;
+        },
+
+        setLang(l) {
+          this.lang = l;
+          document.documentElement.lang = l;
+          document.documentElement.dir = l === 'he' ? 'rtl' : 'ltr';
+          document.title = this.t.title;
+          localStorage.setItem('lang', l);
+        },
+
+        pickDuration(d) {
+          this.duration = d;
+          this.customDuration = null;
+          this.customFocused = false;
+          this.load();
+        },
+
+        onCustomInput() {
+          if (this.customDuration && this.customDuration >= 1) {
+            this.duration = this.customDuration;
+            this.load();
+          }
+        },
+
+        onCustomBlur() {
+          this.customFocused = false;
+          if (!this.customDuration) this.customDuration = null;
+        },
+
+        onLocInput() { this.showDropdown = true; },
+
+        onLocFocus() { if (this.locQuery) this.showDropdown = true; },
+
+        pickLocation(loc) {
+          if (this.selectedLocations.indexOf(loc) === -1) this.selectedLocations.push(loc);
+          this.locQuery = '';
+          this.showDropdown = false;
+          this.saveLocations();
+          this.load();
+        },
+
+        removeLocation(loc) {
+          this.selectedLocations = this.selectedLocations.filter(function(l) { return l !== loc; });
+          this.saveLocations();
+          this.load();
+        },
+
+        saveLocations() {
+          localStorage.setItem('selectedLocations', JSON.stringify(this.selectedLocations));
+        },
+
+        buildUrl() {
+          var u = '/api/predict?duration=' + this.duration;
+          if (this.selectedLocations.length) u += '&location=' + encodeURIComponent(this.selectedLocations.join('|'));
+          return u;
+        },
+
+        load() {
+          var self = this;
+          fetch(this.buildUrl())
+            .then(function(r) {
+              self.connected = r.ok;
+              if (r.ok) return r.json();
+            })
+            .then(function(d) {
+              if (d) {
+                self.data = d;
+                self.lastUpdateTime = new Date().toLocaleTimeString(self.lang === 'he' ? 'he-IL' : 'en-US');
+              }
+            })
+            .catch(function() { self.connected = false; });
+        },
+
+        loadLocations() {
+          var self = this;
+          fetch('/api/locations')
+            .then(function(r) { return r.json(); })
+            .then(function(d) { self.allLocations = d; })
+            .catch(function() {});
+        },
+
+        init() {
+          var self = this;
+          var savedLang = localStorage.getItem('lang');
+          if (savedLang) this.setLang(savedLang);
+          try {
+            var savedLocs = JSON.parse(localStorage.getItem('selectedLocations'));
+            if (Array.isArray(savedLocs) && savedLocs.length) this.selectedLocations = savedLocs;
+          } catch(e) {}
+          this.loadLocations();
+          this.load();
+          this.timer = setInterval(function() { self.load(); }, 30000);
+          document.addEventListener('click', function(e) {
+            var wrap = document.querySelector('.loc-input-wrap');
+            if (wrap && !wrap.contains(e.target)) self.showDropdown = false;
+          });
+        }
+      };
+    }
+  </script>
+</body>
+</html>
