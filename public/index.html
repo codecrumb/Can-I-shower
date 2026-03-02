@@ -398,6 +398,7 @@
         showDropdown: false,
         lastUpdateTime: '–',
         loading: false,
+        initialLoading: true,
         isDebug: false,
         debugTimeInput: '',
         data: {
@@ -416,7 +417,7 @@
         },
 
         get riskDisplay() {
-          if (this.loading) return '–';
+          if (this.initialLoading) return '–';
           if (this.data.noData) return '–';
           if (this.data.minutesSinceLastAlert == null) return '–';
           return Math.round(this.data.risk * 100) + '%';
@@ -427,7 +428,7 @@
         },
 
         get gaugeDash() {
-          if (this.loading || this.data.noData || this.data.minutesSinceLastAlert == null) return '0 ' + this.gaugeArcLen;
+          if (this.initialLoading || this.data.noData || this.data.minutesSinceLastAlert == null) return '0 ' + this.gaugeArcLen;
           var fill = this.gaugeArcLen * Math.min(this.data.risk, 1);
           return fill + ' ' + this.gaugeArcLen;
         },
@@ -437,9 +438,8 @@
         },
 
         get riskLabel() {
-          if (this.loading) return this.t.loading;
-          if (this.data.noData) return this.t.noData;
-          if (this.data.minutesSinceLastAlert == null) return this.t.loading;
+          if (this.initialLoading) return this.t.loading;
+          if (this.data.noData || this.data.minutesSinceLastAlert == null) return this.t.noData;
           var cls = this.riskClass;
           if (cls === 'red') return this.t.riskHigh;
           if (cls === 'yellow') return this.t.riskMed;
@@ -447,7 +447,7 @@
         },
 
         get riskRec() {
-          if (this.loading || this.data.noData || this.data.minutesSinceLastAlert == null) return '';
+          if (this.initialLoading || this.data.noData || this.data.minutesSinceLastAlert == null) return '';
           var cls = this.riskClass;
           if (cls === 'red') return this.t.recHigh;
           if (cls === 'yellow') return this.t.recMed;
@@ -582,6 +582,7 @@
               if (d) {
                 self.data = d;
                 self.lastUpdateTime = new Date().toLocaleTimeString(self.lang === 'he' ? 'he-IL' : 'en-US');
+                self.initialLoading = false;
               }
               self.loading = false;
             })

@@ -10,7 +10,7 @@ const {
 const app = express();
 const PORT = 3000;
 const API_BASE = 'https://agg.rocketalert.live/api/v1/alerts/details';
-const FETCH_INTERVAL = 5 * 60 * 1000;
+const FETCH_INTERVAL = 30 * 1000;
 const HISTORY_DAYS = 90;
 const HTTP_TIMEOUT_MS = 25000;
 

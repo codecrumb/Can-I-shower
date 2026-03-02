@@ -141,10 +141,21 @@ function computeRisk(salvos, windowMin, nowSec, params) {
 
     if (salvos.length < 2) {
         const last = salvos.length === 1 ? salvos[0] : null;
+        const elapsed = last ? (nowSec - last.timestamp) / 60 : null;
+        let risk = last ? 0.5 : 0;
+
+        if (elapsed != null && elapsed > 0) {
+            const quietBlocks = Math.floor(elapsed / (12 * 60));
+            if (quietBlocks > 0) {
+                const quietFactor = Math.pow(0.6, quietBlocks);
+                risk *= quietFactor;
+            }
+        }
+
         return {
-            risk: last ? 0.5 : 0,
+            risk,
             expectedWait: null,
-            minutesSinceLastAlert: last ? (nowSec - last.timestamp) / 60 : null,
+            minutesSinceLastAlert: elapsed,
             lastAlertTime: last ? last.timestamp : null,
             lastAlertLocations: last ? Array.from(last.locations) : [],
             salvoCount: salvos.length,
@@ -163,11 +174,29 @@ function computeRisk(salvos, windowMin, nowSec, params) {
 
     const halflife = Math.max(1, p.barrage_halflife || 10);
     const barrageWeight = Math.exp(-0.693 * elapsed / halflife);
-    const risk = Math.max(0, Math.min(0.99, barrageWeight * barrageRisk + (1 - barrageWeight) * tensionRisk));
+    let risk = Math.max(0, Math.min(0.99, barrageWeight * barrageRisk + (1 - barrageWeight) * tensionRisk));
 
     const sorted = [...gaps].sort((a, b) => a - b);
     const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
-    const expectedWait = estimateExpectedWait(salvos, nowSec, windowMin, p);
+    let expectedWait = estimateExpectedWait(salvos, nowSec, windowMin, p);
+
+    if (elapsed > 0) {
+        const quietBlocks = Math.floor(elapsed / (12 * 60));
+        if (quietBlocks > 0) {
+            const quietFactor = Math.pow(0.6, quietBlocks);
+            risk *= quietFactor;
+            if (expectedWait != null) {
+                expectedWait /= quietFactor;
+            }
+        }
+    }
+
+    // If the hunger-based model thinks we're already at \"high risk now\"
+    // (expectedWait === 0) but the final decayed risk is still below 0.5,
+    // suppress the \"High risk in Now\" indicator by treating it as unknown.
+    if (expectedWait === 0 && risk < 0.5) {
+        expectedWait = null;
+    }
 
     return {
         risk,
