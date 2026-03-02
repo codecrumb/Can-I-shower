@@ -160,15 +160,196 @@ function emptyResponse() {
         risk: 0, level: 'GREEN', minutesSinceLastAlert: null,
         lastAlertTime: null, lastAlertLocations: [], salvoCount: 0,
         gapStats: null, trend: 'stable',
-        expectedNextAlert: null
+        expectedNextAlert: null,
+        modelType: 'hunger+heuristics',
+        hungerInfo: null,
+        reasonings: []
     };
 }
 
-function formatResult(pred, salvos) {
+function clamp01(x) {
+    return Math.max(0, Math.min(0.99, x));
+}
+
+
+function getIsraelClock(nowSec) {
+    const date = new Date(nowSec * 1000);
+    const fmt = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Jerusalem',
+        hour12: false,
+        hour: 'numeric',
+        minute: 'numeric',
+        weekday: 'short',
+        day: 'numeric',
+        month: 'numeric'
+    });
+    const parts = fmt.formatToParts(date);
+    const hourPart = parts.find(p => p.type === 'hour');
+    const minutePart = parts.find(p => p.type === 'minute');
+    const weekdayPart = parts.find(p => p.type === 'weekday');
+    const monthPart = parts.find(p => p.type === 'month');
+    const dayPart = parts.find(p => p.type === 'day');
+    const hour = hourPart ? parseInt(hourPart.value, 10) : 0;
+    const minute = minutePart ? parseInt(minutePart.value, 10) : 0;
+    const weekday = weekdayPart ? weekdayPart.value : 'Mon';
+    const month = monthPart ? parseInt(monthPart.value, 10) : (date.getUTCMonth() + 1);
+    const day = dayPart ? parseInt(dayPart.value, 10) : date.getUTCDate();
+    const minutesSinceMidnight = hour * 60 + minute;
+    const isWeekend = weekday === 'Fri' || weekday === 'Sat';
+    return { hour, minute, minutesSinceMidnight, weekday, isWeekend, month, day };
+}
+
+function applyReasoningEnsemble(pred, salvos, durationMin, nowSec) {
+    const baseRisk = clamp01(pred.risk || 0);
     const gaps = extractGaps(salvos);
+    const clock = getIsraelClock(nowSec);
+    const elapsed = pred.minutesSinceLastAlert;
+
+    const reasonings = [];
+
+    const stats = pred.gapStats || (gaps.length ? (() => {
+        const sorted = [...gaps].sort((a, b) => a - b);
+        const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+        return {
+            mean,
+            median: sorted[Math.floor(sorted.length / 2)],
+            min: sorted[0],
+            max: sorted[sorted.length - 1],
+            count: gaps.length
+        };
+    })() : null);
+
+    const recentSalvoCounts = (() => {
+        const cutoff24 = nowSec - 24 * 3600;
+        const cutoff6 = nowSec - 6 * 3600;
+        let c24 = 0, c6 = 0;
+        for (const s of salvos) {
+            if (s.timestamp >= cutoff24 && s.timestamp <= nowSec) c24++;
+            if (s.timestamp >= cutoff6 && s.timestamp <= nowSec) c6++;
+        }
+        return { last24h: c24, last6h: c6 };
+    })();
+
+    function addReason(id, label, weight, risk, explanation) {
+        const r = clamp01(risk);
+        reasonings.push({
+            id,
+            label,
+            weight,
+            risk: r,
+            contribution: weight * r,
+            explanation
+        });
+    }
+
+    // 1) Core hunger model (existing model)
+    addReason(
+        'core_hunger_model',
+        'Core statistical model',
+        0.5,
+        baseRisk,
+        'Main two-state "hunger" model combining long-term tension build-up with recent barrage intensity.'
+    );
+
+    // 2) Muslim prayer time heuristic (user-requested, external knowledge)
+    (function () {
+        const centers = [
+            5 * 60,       // Fajr
+            12 * 60 + 30, // Dhuhr
+            15 * 60 + 45, // Asr
+            18 * 60 + 15, // Maghrib
+            20 * 60       // Isha
+        ];
+        const m = clock.minutesSinceMidnight;
+        let minDist = Infinity;
+        for (const c of centers) {
+            const d = Math.abs(m - c);
+            if (d < minDist) minDist = d;
+        }
+        let standaloneRisk;
+        let detail;
+        if (minDist <= 20) {
+            standaloneRisk = 0;
+            detail = 'inside a typical Muslim prayer window';
+        } else if (minDist <= 45) {
+            standaloneRisk = 0.5;
+            detail = 'near a typical Muslim prayer window';
+        } else {
+            standaloneRisk = 1;
+            detail = 'far from common prayer windows';
+        }
+        const direction = standaloneRisk < 0.5 ? 'slightly lowers' : standaloneRisk > 0.5 ? 'slightly nudges up' : 'does not change';
+        addReason(
+            'muslim_prayer_times',
+            'Prayer time bias',
+            0.1,
+            standaloneRisk,
+            `Local time in Israel is around ${clock.hour.toString().padStart(2, '0')}:${clock.minute.toString().padStart(2, '0')}, ${detail}, so this heuristic ${direction} the risk when considered on its own.`
+        );
+    })();
+
+    (function () {
+        const h = clock.hour;
+        // Dawn/dusk are operationally significant — transitions in visibility
+        // Late night / pre-dawn launches are common (harder to intercept visually,
+        // element of surprise, people in shelters are sleeping)
+        let standaloneRisk;
+        let desc;
+        if (h >= 2 && h < 5) {
+            standaloneRisk = 0.7;
+            desc = 'Pre-dawn hours (02:00–05:00) are historically favored for rocket launches — darkness provides cover for launch crews and sleeping civilians have slower shelter response.';
+        } else if ((h >= 5 && h < 7) || (h >= 18 && h < 20)) {
+            standaloneRisk = 0.55;
+            desc = 'Dawn and dusk transitions create operational windows — shifting light complicates aerial surveillance and interception.';
+        } else if (h >= 20 || h < 2) {
+            standaloneRisk = 0.45;
+            desc = 'Nighttime sees moderate launch activity — darkness helps but sustained operations are harder to coordinate.';
+        } else {
+            standaloneRisk = 0.25;
+            desc = 'Full daylight exposes launch crews to aerial surveillance, slightly reducing launch likelihood.';
+        }
+        addReason(
+            'darkness_visibility',
+            'Darkness & operational cover',
+            0.05,
+            standaloneRisk,
+            desc
+        );
+    })();
+
+    // Normalize weights so they sum to 1.0 (100%) for display,
+    // and recompute contributions accordingly.
+    let totalWeight = reasonings.reduce((s, r) => s + r.weight, 0);
+    if (totalWeight <= 0) {
+        // Fallback: distribute uniformly if something went wrong.
+        const equal = 1 / (reasonings.length || 1);
+        reasonings.forEach(r => {
+            r.weight = equal;
+            r.contribution = equal * r.risk;
+        });
+        totalWeight = 1;
+    } else {
+        reasonings.forEach(r => {
+            r.weight = r.weight / totalWeight;
+            r.contribution = r.weight * r.risk;
+        });
+        totalWeight = 1;
+    }
+
+    const combinedRisk = clamp01(
+        reasonings.reduce((s, r) => s + r.contribution, 0)
+    );
+
+    return { risk: combinedRisk, reasonings };
+}
+
+function formatResult(pred, salvos, durationMin, nowSec) {
+    const gaps = extractGaps(salvos);
+    const ensemble = applyReasoningEnsemble(pred, salvos, durationMin, nowSec);
+    const risk = ensemble.risk;
     return {
-        risk: pred.risk,
-        level: getLevel(pred.risk),
+        risk,
+        level: getLevel(risk),
         minutesSinceLastAlert: pred.minutesSinceLastAlert,
         lastAlertTime: pred.lastAlertTime,
         lastAlertLocations: pred.lastAlertLocations,
@@ -176,8 +357,9 @@ function formatResult(pred, salvos) {
         gapStats: pred.gapStats,
         trend: computeTrend(gaps.slice(-20)),
         expectedNextAlert: pred.expectedWait,
-        modelType: 'hunger',
-        hungerInfo: pred.hungerInfo
+        modelType: 'hunger+heuristics',
+        hungerInfo: pred.hungerInfo,
+        reasonings: ensemble.reasonings
     };
 }
 
@@ -209,7 +391,7 @@ app.get('/api/predict', (req, res) => {
 
     if (locations.length === 0) {
         const pred = computeRisk(pastSalvos, duration, now, trainedParams);
-        return res.json(formatResult(pred, pastSalvos));
+        return res.json(formatResult(pred, pastSalvos, duration, now));
     }
 
     let worstRisk = -1;
@@ -221,13 +403,13 @@ app.get('/api/predict', (req, res) => {
         const pred = computeRisk(filtered, duration, now, trainedParams);
         if (pred.risk > worstRisk) {
             worstRisk = pred.risk;
-            worstResult = formatResult(pred, filtered);
+            worstResult = formatResult(pred, filtered, duration, now);
         }
     }
     if (worstResult) return res.json(worstResult);
 
     const pred = computeRisk(pastSalvos, duration, now, trainedParams);
-    return res.json(formatResult(pred, pastSalvos));
+    return res.json(formatResult(pred, pastSalvos, duration, now));
 });
 
 app.get('/api/locations', (req, res) => {
@@ -245,7 +427,7 @@ app.get('/api/status', (req, res) => {
         alertCount: allAlerts.length,
         salvoCount: parsed.salvos.length,
         latestAlert,
-        modelType: 'hunger',
+        modelType: 'hunger+heuristics',
         trainedParams
     });
 });
