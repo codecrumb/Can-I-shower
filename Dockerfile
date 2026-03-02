@@ -5,8 +5,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY server.js ./
-COPY public ./public
+COPY . .
 
 EXPOSE 3000
 
