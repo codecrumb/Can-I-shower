@@ -1,8 +1,9 @@
 const fs = require('fs');
 const path = require('path');
-const { computeRisk, DEFAULT_PARAMS, parseIsraelTimestamp, bsearch } = require('../../shared');
+const { computeRisk, computeRiskFromState, DEFAULT_PARAMS, parseIsraelTimestamp, simulateHungerStateFrom } = require('../../shared');
 const { formatResult, emptyResponse, getLevel } = require('../services/riskEngine');
 const { getParsedCache } = require('../services/alertFetcher');
+const { FETCH_INTERVAL_MS } = require('../config');
 
 function loadModelParams() {
     try {
@@ -14,6 +15,20 @@ function loadModelParams() {
 }
 
 const trainedParams = loadModelParams();
+
+const predictCache = new Map();
+const dailyRiskCache = new Map();
+
+function getCached(cache, key) {
+    const entry = cache.get(key);
+    if (entry && Date.now() - entry.ts < FETCH_INTERVAL_MS) return entry.value;
+    cache.delete(key);
+    return null;
+}
+
+function setCache(cache, key, value) {
+    cache.set(key, { value, ts: Date.now() });
+}
 
 function parseDebugNow(val) {
     if (val == null || val === '') return null;
@@ -44,20 +59,28 @@ function handlePredict(searchParams) {
     const locationParam = searchParams.get('location');
     const locations = locationParam ? locationParam.split('|').map(l => l.trim()).filter(Boolean) : [];
     const duration = Math.max(1, parseInt(searchParams.get('duration'), 10) || 15);
-    const now = parseDebugNow(searchParams.get('debugNow')) ?? Math.floor(Date.now() / 1000);
+    const debugNow = parseDebugNow(searchParams.get('debugNow'));
+    const now = debugNow ?? Math.floor(Date.now() / 1000);
+
+    const nowBucket = debugNow != null ? now : Math.floor(now / 30) * 30;
+    const cacheKey = `${nowBucket}|${locationParam || ''}|${duration}`;
+    const cached = getCached(predictCache, cacheKey);
+    if (cached) return cached;
 
     let pastEnd = allSalvos.length;
     while (pastEnd > 0 && allSalvos[pastEnd - 1].timestamp > now) pastEnd--;
     if (pastEnd === 0) return emptyResponse();
     const pastSalvos = pastEnd === allSalvos.length ? allSalvos : allSalvos.slice(0, pastEnd);
 
-    if (locations.length > 0) {
-        const result = resolveLocations(pastSalvos, locations, duration, now, trainedParams);
-        if (result) return result;
+    let result;
+    if (locations.length > 0) result = resolveLocations(pastSalvos, locations, duration, now, trainedParams);
+    if (!result) {
+        const pred = computeRisk(pastSalvos, duration, now, trainedParams);
+        result = formatResult(pred, pastSalvos, duration, now);
     }
 
-    const pred = computeRisk(pastSalvos, duration, now, trainedParams);
-    return formatResult(pred, pastSalvos, duration, now);
+    setCache(predictCache, cacheKey, result);
+    return result;
 }
 
 function handleDailyRisk(searchParams) {
@@ -82,12 +105,19 @@ function handleDailyRisk(searchParams) {
     }
     const dayEndSec = dayStartSec + 86400;
 
+    const nowBucket = debugNow != null ? nowSec : Math.floor(nowSec / 30) * 30;
+    const cacheKey = `${dayStartSec}|${locationParam || ''}|${duration}|${nowBucket}`;
+    const cached = getCached(dailyRiskCache, cacheKey);
+    if (cached) return cached;
+
     const INTERVAL_MIN = 15;
     const points = [];
     let salvoIdx = 0;
+    let hungerState = null;
 
     for (let minuteOfDay = 0; minuteOfDay < 1440; minuteOfDay += INTERVAL_MIN) {
         const pointSec = dayStartSec + minuteOfDay * 60;
+        const prevSalvoIdx = salvoIdx;
         while (salvoIdx < allSalvos.length && allSalvos[salvoIdx].timestamp <= pointSec) salvoIdx++;
         const h = Math.floor(minuteOfDay / 60);
         const m = minuteOfDay % 60;
@@ -98,13 +128,20 @@ function handleDailyRisk(searchParams) {
             continue;
         }
 
+        const newSalvos = salvoIdx > prevSalvoIdx ? allSalvos.slice(prevSalvoIdx, salvoIdx) : [];
+        if (hungerState === null) {
+            const firstSalvo = allSalvos[0];
+            hungerState = { hunger: 0, satiation: 0, prevSec: firstSalvo.timestamp };
+        }
+        hungerState = simulateHungerStateFrom(hungerState, newSalvos, pointSec, trainedParams);
+
         const pastSalvos = allSalvos.slice(0, salvoIdx);
         let result;
         if (locations.length > 0) {
             result = resolveLocations(pastSalvos, locations, duration, pointSec, trainedParams);
         }
         if (!result) {
-            const pred = computeRisk(pastSalvos, duration, pointSec, trainedParams);
+            const pred = computeRiskFromState(hungerState, pastSalvos, duration, pointSec, trainedParams);
             result = formatResult(pred, pastSalvos, duration, pointSec);
         }
 
@@ -134,7 +171,9 @@ function handleDailyRisk(searchParams) {
             };
         });
 
-    return { date, duration, points, salvos: salvosInDay };
+    const result = { date, duration, points, salvos: salvosInDay };
+    setCache(dailyRiskCache, cacheKey, result);
+    return result;
 }
 
 module.exports = { handlePredict, handleDailyRisk };

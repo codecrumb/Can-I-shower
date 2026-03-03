@@ -137,10 +137,9 @@ export default {
                 const annotations = { xaxis: [] };
 
                 for (const salvo of this.salvos) {
-                    const x = wrapToWindow(salvo.minuteOfDay);
-                    if (x < xRange.min || x > xRange.max) continue;
+                    if (salvo.minuteOfDay < xRange.min || salvo.minuteOfDay > currentMin) continue;
                     annotations.xaxis.push({
-                        x,
+                        x: salvo.minuteOfDay,
                         borderColor: '#ef4444',
                         strokeDashArray: 0,
                         borderWidth: 1,

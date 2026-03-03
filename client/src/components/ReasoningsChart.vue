@@ -69,6 +69,7 @@ export default {
                 <div class="reason-top">
                     <span class="reason-dot" :style="{ background: item.color }"></span>
                     <span class="reason-label">{{ item.label }}</span>
+                    <span class="reason-weight">{{ pct(item.weight) }}%</span>
                     <span class="reason-pct">{{ pct(item.contrib) }}%</span>
                 </div>
                 <div class="reason-bar-track">
@@ -150,6 +151,12 @@ export default {
     font-size: 0.88rem;
     font-weight: 600;
     color: #e2e8f0;
+}
+.reason-weight {
+    font-size: 0.7rem;
+    color: #64748b;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
 }
 .reason-pct {
     font-size: 0.85rem;

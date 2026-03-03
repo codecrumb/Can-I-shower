@@ -93,6 +93,33 @@ function simulateHungerState(salvos, nowSec, params) {
     return { hunger: Math.max(0, Math.min(1, hunger)), satiation };
 }
 
+function simulateHungerStateFrom(fromState, newSalvos, nowSec, params) {
+    const { growth_rate, drop_per_salvo, satiation_boost, satiation_decay } = params;
+    let { hunger, satiation, prevSec } = fromState;
+
+    for (const salvo of newSalvos) {
+        if (salvo.timestamp > nowSec) break;
+        const dt = (salvo.timestamp - prevSec) / 60;
+        if (dt > 0) {
+            const state = advanceState(hunger, satiation, dt, growth_rate, satiation_decay);
+            hunger = state.hunger;
+            satiation = state.satiation;
+        }
+        satiation += satiation_boost;
+        hunger *= (1 - drop_per_salvo);
+        prevSec = salvo.timestamp;
+    }
+
+    const dtNow = (nowSec - prevSec) / 60;
+    if (dtNow > 0) {
+        const state = advanceState(hunger, satiation, dtNow, growth_rate, satiation_decay);
+        hunger = state.hunger;
+        satiation = state.satiation;
+    }
+
+    return { hunger: Math.max(0, Math.min(1, hunger)), satiation, prevSec };
+}
+
 function simulateHunger(salvos, nowSec, params) {
     return simulateHungerState(salvos, nowSec, params).hunger;
 }
@@ -222,6 +249,62 @@ function computeRisk(salvos, windowMin, nowSec, params) {
     };
 }
 
+function computeRiskFromState(hungerState, salvos, windowMin, nowSec, params) {
+    const p = params || DEFAULT_PARAMS;
+
+    if (salvos.length < 2) {
+        const last = salvos.length === 1 ? salvos[0] : null;
+        const elapsed = last ? (nowSec - last.timestamp) / 60 : null;
+        let risk = last ? 0.5 : 0;
+        if (elapsed != null && elapsed > 0) {
+            const quietBlocks = Math.floor(elapsed / (12 * 60));
+            if (quietBlocks > 0) risk *= Math.pow(0.6, quietBlocks);
+        }
+        return { risk, expectedWait: null, minutesSinceLastAlert: elapsed, lastAlertTime: last ? last.timestamp : null, lastAlertLocations: last ? Array.from(last.locations) : [], salvoCount: salvos.length, gapStats: null, avgGapLast10Minutes: null, hungerInfo: null };
+    }
+
+    const lastTs = salvos[salvos.length - 1].timestamp;
+    const elapsed = (nowSec - lastTs) / 60;
+    const { hunger } = hungerState;
+    const tensionRisk = hungerToRisk(hunger, windowMin, p);
+
+    const gaps = extractGaps(salvos);
+    const barrageRisk = computeBarrageRisk(gaps, elapsed, windowMin);
+
+    const halflife = Math.max(1, p.barrage_halflife || 10);
+    const barrageWeight = Math.exp(-0.693 * elapsed / halflife);
+    let risk = Math.max(0, Math.min(0.99, barrageWeight * barrageRisk + (1 - barrageWeight) * tensionRisk));
+
+    const sorted = [...gaps].sort((a, b) => a - b);
+    const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    const last10Gaps = salvos.length >= 10 ? gaps.slice(-9) : gaps;
+    const avgGapLast10Minutes = last10Gaps.length ? last10Gaps.reduce((a, b) => a + b, 0) / last10Gaps.length : null;
+    let expectedWait = estimateExpectedWait(salvos, nowSec, windowMin, p);
+
+    if (elapsed > 0) {
+        const quietBlocks = Math.floor(elapsed / (12 * 60));
+        if (quietBlocks > 0) {
+            const quietFactor = Math.pow(0.6, quietBlocks);
+            risk *= quietFactor;
+            if (expectedWait != null) expectedWait /= quietFactor;
+        }
+    }
+
+    if (expectedWait === 0 && risk < 0.5) expectedWait = null;
+
+    return {
+        risk,
+        expectedWait,
+        minutesSinceLastAlert: elapsed,
+        lastAlertTime: lastTs,
+        lastAlertLocations: Array.from(salvos[salvos.length - 1].locations),
+        salvoCount: salvos.length,
+        gapStats: { mean, median: sorted[Math.floor(sorted.length / 2)], min: sorted[0], max: sorted[sorted.length - 1], count: gaps.length },
+        avgGapLast10Minutes,
+        hungerInfo: { hunger, barrageRisk, barrageWeight, tensionRisk, elapsed, params: p },
+    };
+}
+
 // ==================== Helpers ====================
 
 function extractGaps(salvos) {
@@ -260,8 +343,8 @@ function parseIsraelTimestamp(dateStr) {
 module.exports = {
     SALVO_WINDOW_SEC, DAY_SEC,
     buildSalvos,
-    computeRisk, extractGaps,
-    simulateHunger, simulateHungerState, advanceState, hungerToRisk, estimateExpectedWait,
+    computeRisk, computeRiskFromState, extractGaps,
+    simulateHunger, simulateHungerState, simulateHungerStateFrom, advanceState, hungerToRisk, estimateExpectedWait,
     DEFAULT_PARAMS,
     bsearch, hasAlertInWindow,
     parseIsraelTimestamp,
