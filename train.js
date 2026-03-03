@@ -8,18 +8,20 @@ const {
 const API_BASE = 'https://agg.rocketalert.live/api/v1/alerts/details';
 const HTTP_TIMEOUT_MS = 30000;
 
-const POP_SIZE = 100;
-const GENERATIONS = 10;
+const POP_SIZE = 150;
+const GENERATIONS = 30;
 const MUTATION_RATE = 0.35;
-const ELITE_COUNT = 10;
+const ELITE_COUNT = 15;
+const LOCATION_SAMPLES_PER_WINDOW = 5;
+const LOCATION_WEIGHT = 0.4;
 
 const PARAM_RANGES = {
-    growth_rate:      { min: 0.003,  max: 0.03 },
-    drop_per_salvo:   { min: 0.05,   max: 0.8 },
-    satiation_boost:  { min: 0.2,    max: 5 },
-    satiation_decay:  { min: 0.05,   max: 1.0 },
-    base_duration:    { min: 3,      max: 15 },
-    barrage_halflife: { min: 3,      max: 120 },
+    growth_rate:      { min: 0.001,  max: 0.05 },
+    drop_per_salvo:   { min: 0.05,   max: 0.95 },
+    satiation_boost:  { min: 0.1,    max: 8 },
+    satiation_decay:  { min: 0.01,   max: 1.5 },
+    base_duration:    { min: 2,      max: 20 },
+    barrage_halflife: { min: 2,      max: 200 },
 };
 
 const CEASEFIRE_GAP_MIN = 720;
@@ -129,7 +131,28 @@ function buildTestPointsForSet(salvos) {
     return { salvos, points };
 }
 
-function evaluateFitness(params, periodData) {
+function sampleLocationSubsets(salvos, count) {
+    const locationMap = new Map();
+    for (const s of salvos) {
+        if (!s.locations) continue;
+        for (const loc of s.locations) {
+            if (!locationMap.has(loc)) locationMap.set(loc, []);
+            locationMap.get(loc).push(s);
+        }
+    }
+
+    const viable = [...locationMap.entries()].filter(([, arr]) => arr.length >= 3);
+    if (viable.length === 0) return [];
+
+    const subsets = [];
+    for (let i = 0; i < count; i++) {
+        const [, locSalvos] = viable[Math.floor(Math.random() * viable.length)];
+        subsets.push(buildTestPointsForSet(locSalvos));
+    }
+    return subsets;
+}
+
+function evaluateBrier(params, periodData) {
     let brierSum = 0, n = 0;
     for (const { salvos, points } of periodData) {
         for (const { nowSec, durations, actuals } of points) {
@@ -149,6 +172,21 @@ function evaluateFitness(params, periodData) {
     return n > 0 ? brierSum / n : 1;
 }
 
+function evaluateFitness(params, periodData, locationData) {
+    const globalBrier = evaluateBrier(params, periodData);
+    if (locationData.length === 0) return globalBrier;
+    const locationBrier = evaluateBrier(params, locationData);
+    return (1 - LOCATION_WEIGHT) * globalBrier + LOCATION_WEIGHT * locationBrier;
+}
+
+function loadPreviousBest() {
+    try {
+        const model = JSON.parse(fs.readFileSync('model.json', 'utf8'));
+        if (model.params) return model.params;
+    } catch (_) {}
+    return null;
+}
+
 const SEEDS = [
     { growth_rate: 0.005, drop_per_salvo: 0.3, satiation_boost: 2, satiation_decay: 0.1, base_duration: 10, barrage_halflife: 15 },
     { growth_rate: 0.008, drop_per_salvo: 0.2, satiation_boost: 1, satiation_decay: 0.2, base_duration: 8, barrage_halflife: 30 },
@@ -159,9 +197,15 @@ const SEEDS = [
 
 function geneticSearch(salvoSets) {
     const periodData = salvoSets.map(s => buildTestPointsForSet(s));
+    const locationData = salvoSets.flatMap(s => sampleLocationSubsets(s, LOCATION_SAMPLES_PER_WINDOW));
     const totalPoints = periodData.reduce((s, d) => s + d.points.length, 0);
-    console.log(`  ${periodData.length} periods, ${totalPoints} total test points`);
-    const seeded = SEEDS.map(s => clampParams(s));
+    const locPoints = locationData.reduce((s, d) => s + d.points.length, 0);
+    console.log(`  ${periodData.length} periods, ${totalPoints} global test points`);
+    console.log(`  ${locationData.length} location subsets, ${locPoints} location test points`);
+
+    const prevBest = loadPreviousBest();
+    const seeds = prevBest ? [prevBest, ...SEEDS] : SEEDS;
+    const seeded = seeds.map(s => clampParams(s));
     const random = Array.from({ length: POP_SIZE - seeded.length }, () => randomParams());
     let population = [...seeded, ...random];
 
@@ -171,7 +215,7 @@ function geneticSearch(salvoSets) {
     for (let gen = 0; gen < GENERATIONS; gen++) {
         const scored = population.map(p => ({
             params: p,
-            score: evaluateFitness(p, periodData),
+            score: evaluateFitness(p, periodData, locationData),
         })).sort((a, b) => a.score - b.score);
 
         if (scored[0].score < bestScore) {
@@ -179,8 +223,8 @@ function geneticSearch(salvoSets) {
             bestEver = scored[0].params;
         }
 
-        if ((gen + 1) % 10 === 0)
-            console.log(`  Gen ${gen + 1}: best=${scored[0].score.toFixed(4)}, avg=${(scored.reduce((s, x) => s + x.score, 0) / scored.length).toFixed(4)}`);
+        if ((gen + 1) % 5 === 0)
+            console.log(`  Gen ${gen + 1}/${GENERATIONS}: best=${scored[0].score.toFixed(4)}, avg=${(scored.reduce((s, x) => s + x.score, 0) / scored.length).toFixed(4)}`);
 
         const elite = scored.slice(0, ELITE_COUNT).map(s => s.params);
         const newPop = [...elite];

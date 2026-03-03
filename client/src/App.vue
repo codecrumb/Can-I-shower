@@ -1,0 +1,235 @@
+<script>
+import { useTranslations } from '@/composables/useTranslations.js';
+import { fetchPredict, fetchLocations, fetchNearestLocation, fetchDailyRisk, pingViewers, fetchWeights, submitWeights } from '@/composables/useApi.js';
+import AppHeader from '@/components/AppHeader.vue';
+import AppFooter from '@/components/AppFooter.vue';
+import DebugPanel from '@/components/DebugPanel.vue';
+import RiskGauge from '@/components/RiskGauge.vue';
+import DurationPicker from '@/components/DurationPicker.vue';
+import LocationPicker from '@/components/LocationPicker.vue';
+import InfoCards from '@/components/InfoCards.vue';
+import ReasoningsChart from '@/components/ReasoningsChart.vue';
+import DailyGraph from '@/components/DailyGraph.vue';
+
+export default {
+    components: { AppHeader, AppFooter, DebugPanel, RiskGauge, DurationPicker, LocationPicker, InfoCards, ReasoningsChart, DailyGraph },
+    setup() {
+        return useTranslations();
+    },
+    data() {
+        return {
+            isConnected: false,
+            duration: 10,
+            selectedLocations: [],
+            allLocations: [],
+            lastUpdateTime: '–',
+            isLoading: false,
+            isInitialLoading: true,
+            isDebug: false,
+            debugNow: null,
+            viewerId: null,
+            viewersCount: 0,
+            dailyPoints: [],
+            dailySalvos: [],
+            isDailyLoading: false,
+            userWeights: {},
+            weightsSubmitTimer: null,
+            data: {
+                risk: 0, minutesSinceLastAlert: null,
+                salvoCount: 0, trend: 'stable',
+                expectedNextAlert: null, avgGapLast10Minutes: null,
+                noData: false, reasonings: [],
+            },
+            pollTimer: null,
+        };
+    },
+    computed: {
+        hasData() {
+            return !this.isInitialLoading && !this.data.noData && this.data.minutesSinceLastAlert != null;
+        },
+        riskRec() {
+            if (!this.hasData) return '';
+            const r = this.data.risk;
+            if (r >= 0.5) return this.t.recHigh;
+            if (r >= 0.25) return this.t.recMed;
+            return this.t.recLow;
+        },
+        viewerText() {
+            const c = this.viewersCount || 0;
+            if (c <= 1) return '';
+            const others = c - 1;
+            if (others === 1) return this.t.viewersYouAndOne;
+            if (others <= 4) return this.t.viewersYouAndFew.replace('{n}', others);
+            return this.t.viewersYouAndMany.replace('{n}', others);
+        },
+    },
+    mounted() {
+        this.initDebug();
+        this.ensureViewerId();
+        try {
+            const saved = JSON.parse(localStorage.getItem('selectedLocations'));
+            if (Array.isArray(saved) && saved.length) this.selectedLocations = saved;
+        } catch (_) {}
+        this.loadLocations();
+        this.loadWeights();
+        this.load();
+        this.loadDailyRisk();
+        this.pollTimer = setInterval(() => this.load(), 30000);
+        setInterval(() => this.pingViewers(), 25000);
+        this.pingViewers();
+    },
+    beforeUnmount() {
+        clearInterval(this.pollTimer);
+        clearTimeout(this.weightsSubmitTimer);
+    },
+    watch: {
+        duration() { this.load(); this.loadDailyRisk(); },
+        selectedLocations(v) {
+            localStorage.setItem('selectedLocations', JSON.stringify(v));
+            this.load();
+            this.loadDailyRisk();
+        },
+        debugNow() { this.load(); },
+        lang() { this.updateTitle(); },
+    },
+    methods: {
+        initDebug() {
+            try {
+                const params = new URLSearchParams(window.location.search || '');
+                this.isDebug = params.has('debug') && ['true', '', '1'].includes(params.get('debug'));
+            } catch (_) { this.isDebug = false; }
+        },
+        updateTitle() {
+            document.title = this.t.title;
+        },
+        ensureViewerId() {
+            try {
+                const saved = localStorage.getItem('viewerId');
+                if (saved) { this.viewerId = saved; return; }
+            } catch (_) {}
+            const id = (Math.random().toString(36).slice(2) + Date.now().toString(36)).slice(0, 32);
+            this.viewerId = id;
+            try { localStorage.setItem('viewerId', id); } catch (_) {}
+        },
+        async load() {
+            this.isLoading = true;
+            try {
+                const d = await fetchPredict({
+                    duration: this.duration,
+                    locations: this.selectedLocations,
+                    debugNow: this.debugNow,
+                });
+                this.data = d;
+                this.isConnected = true;
+                this.isInitialLoading = false;
+                this.lastUpdateTime = new Date().toLocaleTimeString(this.lang === 'he' ? 'he-IL' : 'en-US');
+            } catch (_) {
+                this.isConnected = false;
+            } finally {
+                this.isLoading = false;
+            }
+        },
+        async loadLocations() {
+            try {
+                this.allLocations = await fetchLocations();
+            } catch (_) {}
+        },
+        async loadWeights() {
+            try {
+                const saved = JSON.parse(localStorage.getItem('userWeights'));
+                if (saved && typeof saved === 'object' && Object.keys(saved).length) {
+                    this.userWeights = saved;
+                    return;
+                }
+            } catch (_) {}
+            try {
+                this.userWeights = await fetchWeights();
+            } catch (_) {}
+        },
+        onWeightsChange(weights) {
+            this.userWeights = weights;
+            try { localStorage.setItem('userWeights', JSON.stringify(weights)); } catch (_) {}
+            clearTimeout(this.weightsSubmitTimer);
+            this.weightsSubmitTimer = setTimeout(() => {
+                submitWeights({ weights, viewerId: this.viewerId }).catch(() => {});
+            }, 2000);
+        },
+        async loadDailyRisk() {
+            this.isDailyLoading = true;
+            try {
+                const result = await fetchDailyRisk({
+                    duration: this.duration,
+                    locations: this.selectedLocations,
+                });
+                this.dailyPoints = result.points || [];
+                this.dailySalvos = result.salvos || [];
+            } catch (_) {
+                this.dailyPoints = [];
+                this.dailySalvos = [];
+            } finally {
+                this.isDailyLoading = false;
+            }
+        },
+        async pingViewers() {
+            if (!this.viewerId) return;
+            try {
+                const d = await pingViewers(this.viewerId);
+                if (d && typeof d.viewers === 'number') this.viewersCount = d.viewers;
+            } catch (_) {}
+        },
+        async startLocationAssist() {
+            if (this.selectedLocations.length) { this.focusLocationInput(); return; }
+            if (!navigator.geolocation) { this.focusLocationInput(); return; }
+            navigator.geolocation.getCurrentPosition(
+                async (pos) => {
+                    const { latitude: lat, longitude: lng } = pos.coords;
+                    try {
+                        const d = await fetchNearestLocation(lat, lng);
+                        if (d && d.name && !this.selectedLocations.includes(d.name)) {
+                            this.selectedLocations = [d.name];
+                        }
+                    } catch (_) { this.focusLocationInput(); }
+                },
+                () => this.focusLocationInput(),
+                { enableHighAccuracy: false, timeout: 5000, maximumAge: 600000 }
+            );
+        },
+        focusLocationInput() {
+            const input = this.$el.querySelector('.loc-input');
+            if (input) { input.scrollIntoView({ behavior: 'smooth', block: 'center' }); input.focus(); }
+        },
+    },
+};
+</script>
+
+<template>
+    <div>
+        <div class="bg-blobs"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+        <div class="app">
+            <DebugPanel v-if="isDebug" v-model="debugNow" />
+            <AppHeader :connected="isConnected" />
+            <RiskGauge
+                :risk="data.risk"
+                :is-loading="isInitialLoading"
+                :has-data="hasData"
+                :viewer-text="viewerText"
+                :risk-rec="riskRec"
+                :has-location="selectedLocations.length > 0"
+                @locate="startLocationAssist"
+            />
+            <section class="controls-card glass">
+                <DurationPicker v-model="duration" />
+                <LocationPicker v-model="selectedLocations" :all-locations="allLocations" />
+            </section>
+            <InfoCards
+                :minutes-since-last-alert="data.minutesSinceLastAlert"
+                :avg-gap-last10-minutes="data.avgGapLast10Minutes"
+                :salvo-count="data.salvoCount"
+                :trend="data.trend"
+            />
+            <DailyGraph :points="dailyPoints" :salvos="dailySalvos" :weights="userWeights" :is-loading="isDailyLoading" />
+            <ReasoningsChart v-if="hasData" :reasonings="data.reasonings" :weights="userWeights" @update:weights="onWeightsChange" />
+            <AppFooter :last-update-time="lastUpdateTime" />
+        </div>
+    </div>
+</template>
