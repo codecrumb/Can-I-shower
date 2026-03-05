@@ -8,7 +8,7 @@ const {
 } = require('../config');
 
 const REDALERT_HISTORY_URL = `${REDALERT_BASE}/api/stats/history`;
-const PAGE_LIMIT = 500;
+const PAGE_LIMIT = 100;
 const PARALLEL_PAGES = 5;
 
 function isoDate(d) { return d.toISOString().slice(0, 10); }
@@ -16,12 +16,23 @@ function isoDate(d) { return d.toISOString().slice(0, 10); }
 // ── RedAlert (primary) ──────────────────────────────────────────────
 
 async function fetchRedAlertPage(page) {
-    const url = `${REDALERT_HISTORY_URL}?page=${page}&limit=${PAGE_LIMIT}&category=missiles`;
+    const offset = (page - 1) * PAGE_LIMIT;
+    const params = new URLSearchParams({
+        offset: String(offset),
+        limit: String(PAGE_LIMIT),
+        category: 'missiles',
+    });
+    const url = `${REDALERT_HISTORY_URL}?${params}`;
+
     const res = await fetch(url, {
         headers: { Authorization: `Bearer ${REDALERT_API_KEY}` },
         signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
     });
-    if (!res.ok) throw new Error(`RedAlert API ${res.status}`);
+
+    if (!res.ok) {
+        const body = await res.text(); // <-- Read the error body
+        throw new Error(`RedAlert API ${res.status}: ${body}`);
+    }
     return res.json();
 }
 
@@ -43,7 +54,8 @@ function parseRedAlertPage(json, cutoff) {
 async function fetchRedAlertHistory(startDate) {
     const cutoff = startDate ? new Date(startDate).getTime() : 0;
     const firstPage = await fetchRedAlertPage(1);
-    const { totalPages } = firstPage.meta;
+    const { total } = firstPage.pagination;
+    const totalPages = Math.ceil(total / PAGE_LIMIT);
     const { alerts, reachedCutoff } = parseRedAlertPage(firstPage, cutoff);
     if (reachedCutoff || totalPages <= 1) return alerts;
 
@@ -57,13 +69,12 @@ async function fetchRedAlertHistory(startDate) {
         for (const json of results) {
             const parsed = parseRedAlertPage(json, cutoff);
             alerts.push(...parsed.alerts);
-            if (parsed.reachedCutoff || json.data.length < PAGE_LIMIT) { done = true; break; }
+            if (parsed.reachedCutoff || !json.pagination.hasMore) { done = true; break; }
         }
         if (done) break;
     }
     return alerts;
 }
-
 async function fetchRedAlertRecent() {
     const json = await fetchRedAlertPage(1);
     const alerts = [];

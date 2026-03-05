@@ -6,6 +6,8 @@ const { handleLocations, handleNearestLocation } = require('./routes/locations')
 const { handleAnalyticsPing } = require('./routes/analytics');
 const { handleWeightsGet, handleWeightsPost } = require('./routes/weights');
 const { handleStatus } = require('./routes/status');
+const { handleBmcWebhookPost } = require('./routes/webhooks');
+const { handleDonationsGet } = require('./routes/donations');
 
 const PUBLIC_DIR = path.join(__dirname, '../public');
 
@@ -54,6 +56,13 @@ async function handleRequest(req) {
         return json(result.data, result.status);
     }
     if (pathname === '/api/status' && req.method === 'GET') return json(handleStatus());
+    if (pathname === '/api/donations' && req.method === 'GET') return json(handleDonationsGet(searchParams));
+    if (pathname === '/api/webhooks/bmc' && req.method === 'POST') {
+        const rawBody = await req.text();
+        const signatureHex = req.headers.get('x-signature-sha256') ?? req.headers.get('X-BMC-Signature') ?? '';
+        const result = handleBmcWebhookPost(rawBody, signatureHex.trim());
+        return json(result.data, result.status);
+    }
 
     return serveStatic(pathname);
 }

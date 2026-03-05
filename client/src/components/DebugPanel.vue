@@ -2,6 +2,7 @@
 export default {
     props: {
         modelValue: { type: Number, default: null },
+        onFakeToast: { type: Function, default: null },
     },
     emits: ['update:modelValue'],
     computed: {
@@ -36,6 +37,7 @@ export default {
         <input id="debug-time" type="datetime-local" :value="inputValue" @change="onInput">
         <div class="debug-actions">
             <button type="button" class="primary" @click="setNow">Now</button>
+            <button v-if="onFakeToast" type="button" class="primary" @click="onFakeToast">Fake toast</button>
         </div>
     </div>
 </template>

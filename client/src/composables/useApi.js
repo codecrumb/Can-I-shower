@@ -29,9 +29,17 @@ export async function fetchDailyRisk({ duration, locations, date, debugNow }) {
     return res.json();
 }
 
-export async function pingViewers(id) {
-    const res = await fetch(`/api/analytics/ping?id=${encodeURIComponent(id)}`);
+export async function pingViewers(id, opts = {}) {
+    let url = `/api/analytics/ping?id=${encodeURIComponent(id)}`;
+    if (opts.lastDonationId != null) url += `&lastDonationId=${encodeURIComponent(String(opts.lastDonationId))}`;
+    const res = await fetch(url);
     if (!res.ok) return null;
+    return res.json();
+}
+
+export async function fetchDonations(after = 0) {
+    const res = await fetch(`/api/donations?after=${encodeURIComponent(String(after))}`);
+    if (!res.ok) return { donations: [] };
     return res.json();
 }
 

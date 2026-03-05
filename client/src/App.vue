@@ -10,9 +10,10 @@ import LocationPicker from '@/components/LocationPicker.vue';
 import InfoCards from '@/components/InfoCards.vue';
 import ReasoningsChart from '@/components/ReasoningsChart.vue';
 import DailyGraph from '@/components/DailyGraph.vue';
+import DonationToast from '@/components/DonationToast.vue';
 
 export default {
-    components: { AppHeader, AppFooter, DebugPanel, RiskGauge, DurationPicker, LocationPicker, InfoCards, ReasoningsChart, DailyGraph },
+    components: { AppHeader, AppFooter, DebugPanel, RiskGauge, DurationPicker, LocationPicker, InfoCards, ReasoningsChart, DailyGraph, DonationToast },
     setup() {
         return useTranslations();
     },
@@ -210,7 +211,7 @@ export default {
     <div>
         <div class="bg-blobs"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
         <div class="app">
-            <DebugPanel v-if="isDebug" v-model="debugNow" />
+            <DebugPanel v-if="isDebug" v-model="debugNow" :on-fake-toast="() => $refs.donationToast?.addFakeToast()" />
             <AppHeader :connected="isConnected" />
             <RiskGauge
                 :risk="weightedRisk"
@@ -241,6 +242,7 @@ export default {
             <DailyGraph :points="dailyPoints" :salvos="dailySalvos" :weights="userWeights" :is-loading="isDailyLoading" :debug-now="debugNow" />
             <ReasoningsChart v-if="hasData" :reasonings="data.reasonings" :weights="userWeights" @update:weights="onWeightsChange" />
             <AppFooter :last-update-time="lastUpdateTime" />
+            <DonationToast ref="donationToast" />
         </div>
     </div>
 </template>
