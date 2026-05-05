@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const REDALERT_BASE = process.env.REDALERT_BASE || 'https://redalert.orielhaim.com';
+const REDALERT_BASE = process.env.REDALERT_BASE || 'https://siren.co.il';
 const REDALERT_API_KEY = process.env.REDALERT_API_KEY || '';
 const OUT_FILE = path.join(__dirname, '..', 'locations-latlong.json');
 

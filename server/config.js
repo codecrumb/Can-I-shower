@@ -1,5 +1,5 @@
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-const REDALERT_BASE = 'https://redalert.orielhaim.com';
+const REDALERT_BASE = 'https://siren.co.il';
 const REDALERT_API_KEY = process.env.REDALERT_API_KEY || '';
 const ROCKETALERT_API_BASE = 'https://agg.rocketalert.live/api/v1/alerts/details';
 const ROCKETALERT_REALTIME_URL = 'https://agg.rocketalert.live/api/v2/alerts/real-time/cached';

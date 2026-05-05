@@ -16,7 +16,7 @@ export default {
         <p>{{ t.disclaimer }}</p>
         <p>
             <span>{{ t.source }}</span>
-            <a href="https://redalert.orielhaim.com" target="_blank" rel="noopener">RedAlert</a>
+            <a href="https://siren.co.il" target="_blank" rel="noopener">RedAlert</a>
         </p>
         <p>{{ t.lastUpdate }}: {{ lastUpdateTime }}</p>
         <div style="display: flex; justify-content: center; gap: 0.75rem; width: 100%;">
